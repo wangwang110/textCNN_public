@@ -29,6 +29,7 @@ def sent2idx(text, wordtoix, opt, is_cnn = True):
 
 
 def prepare_data_for_cnn(seqs_x, opt): 
+    #  prepare_data_for_cnn(sents, opt)
     maxlen=opt.maxlen
     filter_h=opt.filter_shape
     lengths_x = [len(s) for s in seqs_x]
@@ -38,6 +39,7 @@ def prepare_data_for_cnn(seqs_x, opt):
         new_lengths_x = []
         for l_x, s_x in zip(lengths_x, seqs_x):
             if l_x < maxlen:
+                ###
                 new_seqs_x.append(s_x)
                 new_lengths_x.append(l_x)
         lengths_x = new_lengths_x
@@ -55,10 +57,10 @@ def prepare_data_for_cnn(seqs_x, opt):
         for idx in rev:
             xx.append(idx)
         while len(xx) < maxlen + 2*pad:
-            xx.append(0)
+            xx.append(0)                              
         x.append(xx)
     x = np.array(x,dtype='int32')
-    return x   
+    return x[:opt.batch_size]   
     
     
 def prepare_data_for_rnn(seqs_x, opt, is_add_GO = True):
@@ -189,6 +191,9 @@ def prepare_data_for_cnn(seqs_x, opt):
             return None, None
     
     ##如何填充数据
+    
+    seqs_x=seqs_x[:opt.batch_size]
+    
     pad = filter_h -1
     x = []   
     for rev in seqs_x:    
@@ -200,8 +205,7 @@ def prepare_data_for_cnn(seqs_x, opt):
         while len(xx) < maxlen + 2*pad:
             xx.append(0)
         x.append(xx)
-    x=x[:opt.batch_size]
-    
+        
     x = np.array(x,dtype='int32')
     ##数据准备时，对于一个句子，左右两边各填充filter_h -1
     return x

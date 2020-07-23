@@ -65,7 +65,7 @@ class Options(object):
         self.layer = 3
         self.stride = [2,2]   # for two layer cnn/deconv , use self.stride[0]
         self.batch_size = 64
-        self.max_epochs = 100
+        self.max_epochs = 50
         self.n_gan = 900  # self.filter_size * 3
         self.L = 50
 
@@ -110,7 +110,6 @@ class Options(object):
 
 def auto_encoder(x, x_org, is_train, opt, opt_t=None):
     ## auto_encoder(x_, x_org_, is_train_, opt)
-    ## org原始的，正确的
     if not opt_t:
         opt_t = opt
     x_emb, W_norm = embedding(x, opt)   # batch L emb
@@ -186,7 +185,7 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
         ## 输入原来的句子，输出纠正后的句子
         x_ = tf.placeholder(tf.int32, shape=[opt.batch_size, opt.sent_len])
         x_org_ = tf.placeholder(tf.int32, shape=[opt.batch_size, opt.sent_len])
-        ## batchsize ** sequence_length (字符长度？？)
+        ## batchsize ** sequence_length 
         is_train_ = tf.placeholder(tf.bool, name='is_train_')
         
         res_, loss_, train_op = auto_encoder(x_, x_org_, is_train_, opt)
@@ -220,31 +219,69 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
             try:
                 t_vars = tf.trainable_variables()
                 loader = restore_from_save(t_vars, sess, opt)
+                ####
             except Exception as e:
                 print(e)
                 print("No saving session, using random initialization")
                 sess.run(tf.global_variables_initializer())
+        
         ##原来跑的代码有什么问题，为什么结果那么奇怪
+        newx=cPickle.load(open('./data/collect_data','rb'))
+        Nx,Nx_org=newx[0],newx[1]
+        print len(Nx)
+        addlen=len(Nx)
+        savetofile=open("GEC_re",'w')
+     
         for epoch in range(opt.max_epochs):
+            #100次迭代
             print("Starting epoch %d" % epoch)
-            kf = get_minibatches_idx(len(train), opt.batch_size, shuffle=True)
-            for _, train_index in kf:
+            
+            #kf = get_minibatches_idx(len(train), opt.batch_size // 2, shuffle=True)
+            
+            ks = get_minibatches_idx(int(addlen*0.9), opt.batch_size, shuffle=True)
+            #print len(ks)
+            for _, train_index in ks:
+                #print "11111"
                 uidx += 1
-                sents = [train[t] for t in train_index]
+                sents = [Nx_org[t] for t in train_index]
+                sents_permutated =[Nx[t] for t in train_index]
+                
+#                sents.extend(Nx_org[:int(addlen*0.8)])
+#                sents_permutated.extend(Nx[:int(addlen*0.2)])
+#                
 
-                sents_permutated = add_noise(sents, opt)
-
+                ## 随便选组模拟数据
+                index = np.random.choice(len(train), opt.batch_size)
+                ## 为了后面剔除掉一些
+                sents_org = [train[t] for t in index]
+                sents_permutated_org=add_noise(sents_org, opt)
+                
+                sents.extend(sents_org)
+                sents_permutated.extend(sents_permutated_org)
+                
+#                shuff1=np.random.permutation(np.arange(len(sents)))
+#                sents=np.array(sents)[shuff1]
+#                shuff2=np.random.permutation(np.arange(len(sents_permutated)))
+#                sents_permutated=np.array(sents_permutated)[shuff2]
+#                print len(sents)
+                
                 if opt.model != 'rnn_rnn' and opt.model != 'cnn_rnn':
                     x_batch_org = prepare_data_for_cnn(sents, opt) # Batch L
                 else:
                     x_batch_org = prepare_data_for_rnn(sents, opt) # Batch L
+                    
+                shuff1=np.random.permutation(np.arange(len(x_batch_org)))
+                x_batch_org=x_batch_org[shuff1]
 
+                
                 if opt.model != 'rnn_rnn':
                     x_batch = prepare_data_for_cnn(sents_permutated, opt) # Batch L
                 else:
                     x_batch = prepare_data_for_rnn(sents_permutated, opt, is_add_GO = False) # Batch L
                 
-               
+                shuff2=np.random.permutation(np.arange(len(x_batch)))
+                x_batch=x_batch_org[shuff2]
+                
                 
                 # x_print = sess.run([x_emb],feed_dict={x_: x_train} )
                 # print x_print
@@ -252,6 +289,7 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
 
                 # res = sess.run(res_, feed_dict={x_: x_batch, x_org_:x_batch_org})
                 # pdb.set_trace()
+                #print len(x_batch)
 
                 if profile:
                     _, loss = sess.run([train_op, loss_], feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1},options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),run_metadata=run_metadata)
@@ -262,11 +300,14 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
 
                 if uidx % opt.valid_freq == 0:
                     is_train = None
-                    valid_index = np.random.choice(len(val), opt.batch_size)
+
+                    val =Nx_org[int(addlen*0.1):]
+                    val_permutated = Nx[int(addlen*0.1):]
+                    
+                    valid_index = np.random.choice(len(val), 3*opt.batch_size)
                     val_sents = [val[t] for t in valid_index]
-
-                    val_sents_permutated = add_noise(val_sents, opt)
-
+                    val_sents_permutated= [val_permutated[t] for t in valid_index]
+                    
                     if opt.model != 'rnn_rnn' and opt.model != 'cnn_rnn':
                         x_val_batch_org = prepare_data_for_cnn(val_sents, opt)
                     else:
@@ -293,13 +334,23 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
                         print "Val Orig :" + "".join([ixtoword[x] for x in val_sents[0] if x != 0])
                         print "Val Perm :" + "".join([ixtoword[x] for x in val_sents_permutated[0] if x != 0])
                         print "Val Recon:" + "".join([ixtoword[x] for x in res['rec_sents'][0] if x != 0])
-                        # print "Val Recon one hot:" + "".join([ixtoword[x] for x in res['rec_sents_one_hot'][0] if x != 0])
-                    else:
-                        print "Val Orig :" + " ".join([ixtoword[x] for x in val_sents[0] if x != 0])
-                        print "Val Perm :" + " ".join([ixtoword[x] for x in val_sents_permutated[0] if x != 0])
-                        print "Val Recon:" + " ".join([ixtoword[x] for x in res['rec_sents'][0] if x != 0])
-                      ## 有空格单词
-
+                    
+                    if uidx %50 == 0:
+                        for i in range(len(x_val_batch)):
+                           savetofile.writelines("Val Orig :" + "".join([ixtoword[x] for x in val_sents[i] if x != 0]))
+                           savetofile.writelines('\n')
+                           savetofile.writelines("Val Orig :" + "".join([ixtoword[x] for x in val_sents_permutated[i] if x != 0]))
+                           savetofile.writelines('\n')
+                           savetofile.writelines("Val Orig :" + "".join([ixtoword[x] for x in res['rec_sents'][i] if x != 0]))
+                           savetofile.writelines('\n')
+                           # print "Val Recon one hot:" + "".join([ixtoword[x] for x in res['rec_sents_one_hot'][0] if x != 0])
+#                        
+#                    else:
+#                        print "Val Orig :" + " ".join([ixtoword[x] for x in val_sents[0] if x != 0])
+#                        print "Val Perm :" + " ".join([ixtoword[x] for x in val_sents_permutated[0] if x != 0])
+#                        print "Val Recon:" + " ".join([ixtoword[x] for x in res['rec_sents'][0] if x != 0])
+#                      ## 有空格单词
+#
 
 
                     val_set = [prepare_for_bleu(s) for s in val_sents]
@@ -321,7 +372,7 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
                     test_writer.add_summary(summary_ext, uidx)
                     is_train = True
 
-
+                
                 if uidx%opt.print_freq == 0:
                     print("Iteration %d: loss %f " %(uidx, loss))
                     res = sess.run(res_, feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1})
@@ -355,6 +406,7 @@ def run_model(opt, train, val, test, wordtoix, ixtoword):
                         tfprof_options=tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY)
 
             saver.save(sess, opt.save_path)
+        savetofile.close()
 
 
 
@@ -380,7 +432,7 @@ def main():
    train_lab, val_lab, test_lab        = x[6], x[7], x[8]
    # wordtoix, ixtoword                  = x[9], x[10]
    if opt.char:
-        ## 如果事字符级别
+        ## 如果事字符级
         wordtoix, ixtoword, alphabet = x[9], x[10], x[11]
    else:
         wordtoix, ixtoword = x[9], x[10]
@@ -390,7 +442,7 @@ def main():
    if not opt.char:
         ## 单词级别
         opt.n_words = len(ixtoword) + 1
-        ixtoword[opt.n_words-1] = 'GO_' ##?
+        ixtoword[opt.n_words-1] = 'GO_' ##加了字符
         
    print dict(opt)
    print('Total words: %d' % opt.n_words)

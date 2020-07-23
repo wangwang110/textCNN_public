@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Yizhe Zhang
 
@@ -22,11 +23,9 @@ from tensorflow.python.ops import nn_ops, math_ops, embedding_ops, variable_scop
 
 
 def embedding(features, opt, prefix = '', is_reuse = None):
+    # x_emb, W_norm = embedding(x, opt) 
     """Customized function to transform batched x into embeddings."""
     # Convert indexes of words into embeddings.
-
-
-
 
     #    b = tf.get_variable('b', [opt.embed_size], initializer = tf,random_uniform_initializer(-0.01, 0.01))
     with tf.variable_scope(prefix+'embed', reuse=is_reuse):
@@ -34,6 +33,7 @@ def embedding(features, opt, prefix = '', is_reuse = None):
             assert(hasattr(opt,'emb'))
             assert(np.shape(np.array(opt.emb))==(opt.n_words, opt.embed_size))
             W = tf.get_variable('W', [opt.n_words, opt.embed_size], weights_initializer = opt.emb, is_trainable = False)
+            #预训练的字向量？
         else:
             weightInit = tf.random_uniform_initializer(-0.001, 0.001)
             W = tf.get_variable('W', [opt.n_words, opt.embed_size], initializer = weightInit)
@@ -78,6 +78,9 @@ def classifier_2layer(H, opt, dropout = 1, prefix = '', num_outputs=1, is_reuse=
 
 
 def discriminator(x, W, opt, prefix = 'd_', is_prob = False, is_reuse = None):
+    ##  logits_real, _ = discriminator(x_org, W_norm, opt)
+    ##  discriminator(tf.exp(prob_one_hot), W_norm, opt, is_prob = True, is_reuse = True)
+    
     W_norm_d = tf.identity(W)   # deep copy
     tf.stop_gradient(W_norm_d)  # the discriminator won't update W
     if is_prob:
@@ -101,10 +104,13 @@ def discriminator(x, W, opt, prefix = 'd_', is_prob = False, is_reuse = None):
 
 
 def conv_encoder(x_emb, is_train, opt, res, is_reuse = None, prefix = ''):
+    ##  H_enc, res = conv_encoder(x_emb, is_train, opt, res)
+    ## res ?
     if hasattr(opt, 'multiplier'):
         multiplier = opt.multiplier
     else:
         multiplier = 2
+    
     if opt.layer == 4:
         H_enc = conv_model_4layer(x_emb, opt, is_train = is_train, is_reuse = is_reuse, prefix = prefix)
     elif opt.layer == 3:
@@ -116,6 +122,7 @@ def conv_encoder(x_emb, is_train, opt, res, is_reuse = None, prefix = ''):
     return H_enc, res
 
 def deconv_decoder(H_dec, x_org, W_norm, is_train, opt, res, prefix = '', is_reuse = None):
+    ## loss, res = deconv_decoder(H_dec, x_org, W_norm, is_train, opt_t, res)
     if hasattr(opt, 'multiplier'):
         multiplier = opt.multiplier
     else:
@@ -130,6 +137,7 @@ def deconv_decoder(H_dec, x_org, W_norm, is_train, opt, res, prefix = '', is_reu
     else:
         x_rec = deconv_model(H_dec, opt, is_train = is_train, prefix= prefix, is_reuse = is_reuse)  #  batch L emb 1
     print("Decoder len %d Output len %d" % (x_rec.get_shape()[1], x_org.get_shape()[1]))
+    ##batchsize
     tf.assert_equal(x_rec.get_shape()[1], x_org.get_shape()[1])
     x_rec_norm = normalizing(x_rec, 2)    # batch L emb
     #W_reshape = tf.reshape(tf.transpose(W),[1,1,opt.embed_size,opt.n_words])
@@ -145,32 +153,48 @@ def deconv_decoder(H_dec, x_org, W_norm, is_train, opt, res, prefix = '', is_reu
     #     res['rec_sents'] = rec_sent
     #
     # else:
-    x_temp = tf.reshape(x_org, [-1,])
+    x_temp = tf.reshape(x_org, [-1,])  ## (batchsize*seq_L)
     if hasattr(opt, 'attentive_emb') and opt.attentive_emb:
+        #前面的那个常数
         emb_att = tf.get_variable(prefix+'emb_att', [1,opt.embed_size], initializer = tf.constant_initializer(1.0, dtype=tf.float32))
         prob_logits = tf.tensordot(tf.squeeze(x_rec_norm), emb_att*W_norm, [[2],[1]])  # c_blv = sum_e x_ble W_ve
+       
     else:
         prob_logits = tf.tensordot(tf.squeeze(x_rec_norm), W_norm, [[2],[1]])  # c_blv = sum_e x_ble W_ve
-
-    prob = tf.nn.log_softmax(prob_logits*opt.L, dim=-1, name=None)
+        ## batchsize*seq_L*V
+    
+    
+    prob = tf.nn.log_softmax(prob_logits*opt.L, dim=-1, name=None) ## batchsize*seq_L*V
+    
     #prob = normalizing(tf.reduce_sum(x_rec_norm * W_reshape, 2), 2)
     #prob = softmax_prediction(x_rec_norm, opt)
+    
     rec_sent = tf.squeeze(tf.argmax(prob,2))
+    ## batchsize*seq_L 索引到单词
+    
     prob = tf.reshape(prob, [-1,opt.n_words])
+    ## (batchsize*seq_L)*V
 
     idx = tf.range(opt.batch_size * opt.sent_len)
-    #print idx.get_shape(), idx.dtype
 
+    #print idx.get_shape(), idx.dtype
+ 
+    ## 原始的单词
     all_idx = tf.transpose(tf.stack(values=[idx,x_temp]))
+    ## 2 x (batchsize*seq_L)
     all_prob = tf.gather_nd(prob, all_idx)
+    # Gather slices from params into a Tensor with shape specified by indices.
+    ##  (batchsize*seq_L)*V
 
     #pdb.set_trace()
 
+
+    ## 模型跑出的单词
     gen_temp = tf.cast(tf.reshape(rec_sent, [-1,]), tf.int32)
     gen_idx = tf.transpose(tf.stack(values=[idx,gen_temp]))
     gen_prob = tf.gather_nd(prob, gen_idx)
 
-    res['rec_sents'] = rec_sent
+    res['rec_sents'] = rec_sent ####
 
     #res['gen_p'] = tf.exp(gen_prob[0:opt.sent_len])
     #res['all_p'] = tf.exp(all_prob[0:opt.sent_len])
@@ -179,14 +203,14 @@ def deconv_decoder(H_dec, x_org, W_norm, is_train, opt, res, prefix = '', is_reu
         logits_real, _ = discriminator(x_org, W_norm, opt)
         prob_one_hot = tf.nn.log_softmax(prob_logits*opt.L, dim=-1, name=None)
         logits_syn, _ = discriminator(tf.exp(prob_one_hot), W_norm, opt, is_prob = True, is_reuse = True)
-
+        ## 两个输入维度不一样啊
         res['prob_r'] =  tf.reduce_mean(tf.nn.sigmoid(logits_real))
         res['prob_f'] = tf.reduce_mean(tf.nn.sigmoid(logits_syn))
 
         loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.ones_like(logits_real), logits = logits_real)) + \
                      tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.zeros_like(logits_syn), logits = logits_syn))
     else:
-        loss = -tf.reduce_mean( all_prob)
+        loss = -tf.reduce_mean(all_prob)
     return loss, res
 
 
@@ -195,6 +219,8 @@ def deconv_decoder(H_dec, x_org, W_norm, is_train, opt, res, prefix = '', is_reu
 
 
 def regularization(X, opt, is_train, prefix= '', is_reuse= None):
+    ## regularization(X, opt,  prefix= prefix + 'reg_X', is_reuse= is_reuse, is_train = is_train)
+    ## batch_norm 以及 dropout之类的操作
     if '_X' not in prefix and '_H_dec' not in prefix:
         if opt.batch_norm:
             X = layers.batch_norm(X, decay=0.9, center=True, scale=True, is_training=is_train, scope=prefix+'_bn', reuse = is_reuse)
@@ -225,6 +251,9 @@ def conv_model(X, opt, prefix = '', is_reuse= None, is_train = True):  # 2layers
 
 
 def conv_model_3layer(X, opt, prefix = '', is_reuse= None, num_outputs = None, is_train = True, multiplier = 2):
+    
+    ##  conv_model_3layer(x_emb, opt, is_train = is_train, multiplier = multiplier, is_reuse = is_reuse, prefix = prefix)
+    
     #XX = tf.reshape(X, [-1, , 28, 1])
     #X shape: batchsize L emb 1
     if opt.reuse_cnn:
@@ -232,8 +261,8 @@ def conv_model_3layer(X, opt, prefix = '', is_reuse= None, num_outputs = None, i
         weightInit = opt.cnn_W
     else:
         biasInit = None if opt.batch_norm else tf.constant_initializer(0.001, dtype=tf.float32)
-        weightInit = tf.constant_initializer(0.001, dtype=tf.float32)
-
+        weightInit = tf.constant_initializer(0.001, dtype=tf.float32) #用于初始化
+    
     X = regularization(X, opt,  prefix= prefix + 'reg_X', is_reuse= is_reuse, is_train = is_train)
     H1 = layers.conv2d(X,  num_outputs=opt.filter_size,  kernel_size=[opt.filter_shape, opt.embed_size], stride = [opt.stride[0],1],  weights_initializer = weightInit, biases_initializer=biasInit, activation_fn=None, padding = 'VALID', scope = prefix + 'H1_3', reuse = is_reuse)  # batch L-3 1 Filtersize
 
@@ -306,6 +335,9 @@ def deconv_model(H, opt, prefix = '', is_reuse= None, is_train = True):
     return Xhat
 
 def deconv_model_3layer(H, opt, prefix = '', is_reuse= None, is_train = True, multiplier = 2):
+    
+    # deconv_model_3layer(H_dec, opt, is_train = is_train, multiplier = multiplier, prefix= prefix, is_reuse = is_reuse) 
+    
     #XX = tf.reshape(X, [-1, , 28, 1])
     #X shape: batchsize L emb 1
     biasInit = None if opt.batch_norm else tf.constant_initializer(0.001, dtype=tf.float32)
@@ -314,7 +346,7 @@ def deconv_model_3layer(H, opt, prefix = '', is_reuse= None, is_train = True, mu
 
     H3t = regularization(H3t, opt, prefix= prefix + 'reg_H_dec', is_reuse= is_reuse, is_train = is_train)
     H2t = layers.conv2d_transpose(H3t, num_outputs=opt.filter_size*multiplier,  kernel_size=[opt.sent_len3, 1],  biases_initializer=biasInit, activation_fn=None ,padding = 'VALID', scope = prefix + 'H2_t_3', reuse = is_reuse)
-
+    ## stride 默认为1
     H2t = regularization(H2t, opt, prefix= prefix + 'reg_H2_dec', is_reuse= is_reuse, is_train = is_train)
     H1t = layers.conv2d_transpose(H2t, num_outputs=opt.filter_size,  kernel_size=[opt.filter_shape, 1], stride = [opt.stride[1],1],  biases_initializer=biasInit, activation_fn=None ,padding = 'VALID', scope = prefix + 'H1_t_3', reuse = is_reuse)
 
@@ -347,9 +379,4 @@ def deconv_model_4layer(H, opt, prefix = '', is_reuse= None, is_train = True):
     Xhat = layers.conv2d_transpose(H1t, num_outputs=1,  kernel_size=[opt.filter_shape, opt.embed_size], stride = [opt.stride[0],1],  biases_initializer=dec_bias, activation_fn=dec_acf, padding = 'VALID',scope = prefix + 'Xhat_t_3', reuse = is_reuse)
     #print H2t.get_shape(),H1t.get_shape(),Xhat.get_shape()
     return Xhat
-
-
-
-
-
 
